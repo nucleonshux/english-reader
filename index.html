@@ -84,14 +84,6 @@
 .engine-btn.on{border-color:var(--coral);background:var(--coral);color:#fff}
 .engine-btn:active{transform:scale(.95)}
 .engine-hint{font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5}
-.relay-row{display:none;flex-direction:column;gap:6px;margin-bottom:12px}
-.relay-row.show{display:flex}
-.relay-row label{font-size:12px;color:var(--ink-soft);font-weight:600}
-.relay-row input{
-  padding:9px 12px;border-radius:12px;border:2px solid var(--line);
-  background:#fff;font-size:14px;color:var(--ink);width:100%;box-sizing:border-box;
-}
-.relay-row input:focus{outline:none;border-color:var(--sky)}
 .kid-row{margin-bottom:12px}
 .kid-btn{
   width:100%;padding:10px;border-radius:14px;border:2px solid var(--line);
@@ -371,16 +363,9 @@
     <div class="sheet-title">选择朗读音色</div>
     <div class="engine-row" id="engineRow">
       <button class="engine-btn" data-engine="system">系统语音</button>
-      <button class="engine-btn" data-engine="google">谷歌真人</button>
-      <button class="engine-btn" data-engine="relay">自定义中继</button>
+      <button class="engine-btn" data-engine="edge">真人语音</button>
     </div>
-    <p class="engine-hint" id="engineHint">谷歌真人：谷歌在线 TTS 真人音色；需联网，失败自动切回系统语音。</p>
-    <div class="relay-row" id="relayRow">
-      <label>配音 TTS 中继地址（iPad 上填电脑局域网 IP，如 http://192.168.1.5:8899）</label>
-      <input id="relayBase" type="text" value="http://localhost:8899">
-      <label>朗读音色</label>
-      <input id="relayVoice" type="text" value="Ava">
-    </div>
+    <p class="engine-hint" id="engineHint">真人语音：微软 Ava 在线音色（免安装、需联网），失败自动切回系统语音。</p>
     <div class="kid-row">
       <button class="kid-btn" id="kidBtn">童声模式（音调更高）</button>
     </div>
@@ -409,13 +394,11 @@ const S = {
   engine:"system",
   curAudio:null,
   kid:false,
-  relayBase:"http://localhost:8899",
-  relayVoice:"Ava"
+  edgeCancel:false
 };
-try{let _e=localStorage.getItem("er_engine");if(_e==="baidu")_e="google";S.engine=_e||"system";}catch(e){}
+try{let _e=localStorage.getItem("er_engine");if(_e==="baidu"||_e==="google")_e="edge";S.engine=_e||"system";}catch(e){}
 try{S.kid=localStorage.getItem("er_kid")==="1";}catch(e){}
-try{S.relayBase=localStorage.getItem("er_relay")||"http://localhost:8899";}catch(e){}
-try{S.relayVoice=localStorage.getItem("er_relayvoice")||"Ava";}catch(e){}
+
 const SPEEDS=[0.6,0.8,1.0,1.2];
 const FONTS=[18,21,25,29];
 const FONT_LBL=["小","标准","大","特大"];
@@ -466,42 +449,74 @@ function speak(text,onEnd,onBoundary){
   speechSynthesis.speak(u);
 }
 
-function speakRemote(text,onEnd){
-  /* 谷歌 TTS 在线：真人音色；长文本会被截断，超过 180 字符退回系统语音 */
-  if(text.length>180){speak(text,onEnd);return;}
-  const url="https://translate.googleapis.com/translate_tts?ie=UTF-8&q="+encodeURIComponent(text)+"&tl=en&client=tw-ob";
+function _uuid4(){
+  if(crypto.randomUUID)return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==="x"?r:(r&0x3|0x8);return v.toString(16);});
+}
+function _ts(){return new Date().toISOString().replace("Z","+00:00");}
+function _ssml(text){
+  const esc=text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+  const rate=Math.round((S.speed-1)*100)+"%";
+  return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='en-US-AvaNeural'><prosody pitch='+0Hz' rate='"+rate+"' volume='+0%'>"+esc+"</prosody></voice></speak>";
+}
+function playEdge(text,onEnd){
+  /* 微软 Edge TTS 免费在线：Ava 真人音色（WebSocket 直连，无需 key、无需本地服务） */
+  if(typeof WebSocket==="undefined"||typeof crypto==="undefined"||!crypto.subtle){speak(text,onEnd);return;}
+  if(text.length>800){speak(text,onEnd);return;} /* 超长回退系统语音 */
+  S.edgeCancel=false;
   let ended=false;
   const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
   const fallback=()=>{if(ended)return;ended=true;toast("在线语音加载失败，已切换系统语音");speak(text,onEnd);};
-  try{
-    const a=new Audio(url);
-    a.referrerPolicy="no-referrer";
-    a.preload="auto";
-    a.playbackRate=S.speed;
-    S.curAudio=a;
-    a.onended=doneOnce;
-    a.onerror=fallback;
-    const pr=a.play();
-    if(pr&&pr.catch)pr.catch(fallback);
-  }catch(e){fallback();}
-}
-function playRelay(text,onEnd){
-  /* 自定义 TTS 中继（如 Edge-TTS 本地服务）：{地址}?text=..&voice=.. 返回音频 */
-  let ended=false;
-  const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
-  const fallback=()=>{if(ended)return;ended=true;toast("中继语音加载失败，已切换系统语音");speak(text,onEnd);};
-  try{
-    const url=S.relayBase+(S.relayBase.indexOf("?")>=0?"&":"?")+"text="+encodeURIComponent(text)+"&voice="+encodeURIComponent(S.relayVoice);
-    const a=new Audio(url);
-    a.referrerPolicy="no-referrer";
-    a.preload="auto";
-    a.playbackRate=S.speed;
-    S.curAudio=a;
-    a.onended=doneOnce;
-    a.onerror=fallback;
-    const pr=a.play();
-    if(pr&&pr.catch)pr.catch(fallback);
-  }catch(e){fallback();}
+  const chunks=[];let gotAudio=false,finished=false,played=false;
+  let t=Math.floor(Date.now()/1000)+11644473600;
+  t-=t%300;t*=10000000;
+  const gecStr=t.toString()+"6A5AA1D4EAFF4E9FB37E23D68491D6F4";
+  crypto.subtle.digest("SHA-256",new TextEncoder().encode(gecStr)).then(function(h){
+    const token=Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
+    const url="wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId="+_uuid4()+"&Sec-MS-GEC="+token+"&Sec-MS-GEC-Version=1-143.0.3650.75";
+    let ws;
+    try{ws=new WebSocket(url);}catch(e){fallback();return;}
+    ws.binaryType="arraybuffer";
+    const timer=setTimeout(function(){try{ws.close();}catch(e){}if(!finished)fallback();},15000);
+    ws.onopen=function(){
+      ws.send("X-Timestamp:"+_ts()+"\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"false\"},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}}");
+      ws.send("X-RequestId:"+_uuid4()+"\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:"+_ts()+"\r\nPath:ssml\r\n\r\n"+_ssml(text));
+    };
+    ws.onmessage=function(ev){
+      if(typeof ev.data==="string"){
+        if(ev.data.indexOf("Path:turn.end")>=0){
+          clearTimeout(timer);
+          finished=true;
+          if(!gotAudio)fallback();
+          try{ws.close();}catch(e){}
+        }
+        return;
+      }
+      const buf=new Uint8Array(ev.data);
+      if(buf.length<4)return;
+      const hl=(buf[0]<<8)|buf[1];
+      if(buf.length<2+hl+2)return;
+      const head=new TextDecoder().decode(buf.subarray(2,2+hl));
+      if(head.indexOf("Path:audio")<0)return;
+      const audio=buf.slice(2+hl+2);
+      if(audio.length){gotAudio=true;chunks.push(audio);}
+    };
+    ws.onerror=function(){clearTimeout(timer);fallback();};
+    ws.onclose=function(){
+      if(finished&&gotAudio&&!played&&!S.edgeCancel){
+        played=true;
+        try{
+          const blob=new Blob(chunks,{type:"audio/mpeg"});
+          const a=new Audio(URL.createObjectURL(blob));
+          a.onended=function(){URL.revokeObjectURL(a.src);doneOnce();};
+          a.onerror=function(){URL.revokeObjectURL(a.src);fallback();};
+          S.curAudio=a;
+          const pr=a.play();
+          if(pr&&pr.catch)pr.catch(fallback);
+        }catch(e){fallback();}
+      }
+    };
+  }).catch(fallback);
 }
 
 /* ========== 句子切分 ========== */
@@ -692,10 +707,8 @@ function playOne(i,onDone){
     if(onDone)onDone();
   };
   /* 整句一次朗读：连贯自然；桌面 Chrome 可逐词高亮，iOS 整句高亮 */
-  if(S.engine==="google"){
-    speakRemote(S.sents[i],done);
-  }else if(S.engine==="relay"){
-    playRelay(S.sents[i],done);
+  if(S.engine==="edge"){
+    playEdge(S.sents[i],done);
   }else{
     speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
   }
@@ -707,6 +720,7 @@ function toggleSentence(i){
 }
 function stopAll(){
   clearHl();
+  S.edgeCancel=true;
   if(S.curAudio){try{S.curAudio.pause();}catch(e){}S.curAudio=null;}
   if(typeof speechSynthesis!=="undefined")speechSynthesis.cancel();
   document.querySelectorAll(".sent.playing").forEach(c=>c.classList.remove("playing"));
@@ -938,15 +952,8 @@ function renderEngine(){
   document.querySelectorAll(".engine-btn").forEach(b=>b.classList.toggle("on",b.dataset.engine===S.engine));
   const kb=$("kidBtn");
   if(kb)kb.classList.toggle("on",S.kid);
-  const rr=$("relayRow");
-  if(rr){
-    rr.classList.toggle("show",S.engine==="relay");
-    const rb=$("relayBase"),rv=$("relayVoice");
-    if(rb)rb.value=S.relayBase;
-    if(rv)rv.value=S.relayVoice;
-  }
   const hint=$("engineHint");
-  if(hint)hint.style.display=(S.engine==="google")?"block":"none";
+  if(hint)hint.style.display=(S.engine==="edge")?"block":"none";
 }
 function renderVoices(){
   renderEngine();
@@ -981,14 +988,6 @@ $("btnVoice").addEventListener("click",()=>{
   $("voiceSheet").classList.add("show");$("mask").classList.add("show");
 });
 $("voiceClose").addEventListener("click",closeVoice);
-$("relayBase").addEventListener("change",()=>{
-  S.relayBase=($("relayBase").value||"").trim()||"http://localhost:8899";
-  try{localStorage.setItem("er_relay",S.relayBase);}catch(e){}
-});
-$("relayVoice").addEventListener("change",()=>{
-  S.relayVoice=($("relayVoice").value||"").trim()||"Ava";
-  try{localStorage.setItem("er_relayvoice",S.relayVoice);}catch(e){}
-});
 $("kidBtn").addEventListener("click",()=>{
   S.kid=!S.kid;
   try{localStorage.setItem("er_kid",S.kid?"1":"0");}catch(e){}
@@ -1000,7 +999,7 @@ document.querySelectorAll(".engine-btn").forEach(b=>{
     S.engine=b.dataset.engine;
     try{localStorage.setItem("er_engine",S.engine);}catch(e){}
     renderEngine();
-    toast(S.engine==="google"?"已切换：谷歌真人（在线）":S.engine==="relay"?"已切换：自定义中继 · "+S.relayVoice:"已切换：系统语音");
+    toast(S.engine==="edge"?"已切换：真人语音（Ava 在线）":"已切换：系统语音");
   });
 });
 
