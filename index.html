@@ -83,6 +83,14 @@
 .engine-btn.on{border-color:var(--coral);background:var(--coral);color:#fff}
 .engine-btn:active{transform:scale(.95)}
 .engine-hint{font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5}
+.kid-row{margin-bottom:12px}
+.kid-btn{
+  width:100%;padding:10px;border-radius:14px;border:2px solid var(--line);
+  background:var(--paper);font-size:14px;font-weight:700;color:var(--ink);
+  transition:transform .12s ease;
+}
+.kid-btn.on{border-color:var(--sky);background:var(--sky);color:#fff}
+.kid-btn:active{transform:scale(.97)}
   .jump-wrap{
     display:inline-flex;align-items:center;gap:4px;
     background:var(--paper);border:1px solid var(--line);border-radius:999px;
@@ -357,6 +365,9 @@
       <button class="engine-btn" data-engine="baidu">在线真人</button>
     </div>
     <p class="engine-hint" id="engineHint">在线真人：整句连读更自然，需要联网；失败会自动切回系统语音。</p>
+    <div class="kid-row">
+      <button class="kid-btn" id="kidBtn">童声模式（音调更高）</button>
+    </div>
     <div id="voiceList"></div>
     <p class="sheet-tip">提示：iPad 可免费下载更多英语语音：「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」里下载后，回来就能看到新音色。</p>
     <button class="w-close" id="voiceClose">关闭</button>
@@ -380,9 +391,11 @@ const S = {
   curWord:"",
   voiceName:"",
   engine:"system",
-  curAudio:null
+  curAudio:null,
+  kid:false
 };
 try{S.engine=localStorage.getItem("er_engine")||"system";}catch(e){}
+try{S.kid=localStorage.getItem("er_kid")==="1";}catch(e){}
 const SPEEDS=[0.6,0.8,1.0,1.2];
 const FONTS=[18,21,25,29];
 const FONT_LBL=["小","标准","大","特大"];
@@ -416,7 +429,7 @@ function speak(text,onEnd,onBoundary){
   u.lang="en-US";
   const v=pickVoice();if(v)u.voice=v;
   u.rate=S.speed;
-  u.pitch=1;
+  u.pitch=S.kid?1.35:1; /* 童声模式：音调提高，更像小朋友 */
   const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent||"");
   const kick=isIOS?setInterval(()=>{if(!speechSynthesis.speaking){clearInterval(kick);}else{speechSynthesis.resume();}},6500):null;
   let ended=false;
@@ -432,9 +445,10 @@ function speakRemote(text,onEnd){
   const url="https://fanyi.baidu.com/gettts?lan=en&text="+encodeURIComponent(text)+"&spd=3&source=web";
   let ended=false;
   const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
-  const fallback=()=>{if(ended)return;ended=true;speak(text,onEnd);};
+  const fallback=()=>{if(ended)return;ended=true;toast("在线语音加载失败，已切换系统语音");speak(text,onEnd);};
   try{
     const a=new Audio(url);
+    a.referrerPolicy="no-referrer"; /* 关键：不带 Referer，百度才会返回真实音频 */
     a.preload="auto";
     a.playbackRate=S.speed;
     S.curAudio=a;
@@ -447,6 +461,8 @@ function speakRemote(text,onEnd){
 
 /* ========== 句子切分 ========== */
 const ABBR=/\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Ave|Blvd|Rd|Ltd|Inc|Co|Corp|Jr|Sr|vs|etc|e\.g|i\.e|no|fig|approx|dept|est|min|max|hr|sec|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun|U\.S|U\.K|U\.N|Ph\.D|M\.D)\.\s*$/i;
+/* 逗号/分号/冒号前至少多少词才断句：调大 → 句子更长更完整；调小 → 句子更短更碎 */
+const MIN_COMMA_WORDS=4;
 function splitLong(s){
   const words=s.split(/\s+/);
   if(words.length<=33)return[s];
@@ -496,6 +512,12 @@ function splitSentences(text){
     for(let i=0;i<chars.length;i++){
       buf+=chars[i];
       const c=chars[i];
+      /* 逗号/分号/冒号：按逗号断句，但逗号前词数不足时不切（并入后续） */
+      if(c===","||c===";"||c===":"){
+        const cnt=buf.replace(/[;,:\s]+$/,"").trim().split(/\s+/).filter(Boolean).length;
+        if(cnt>=MIN_COMMA_WORDS){ out.push(buf.trim()); buf=""; }
+        continue;
+      }
       const isEnd=(c==="."||c==="!"||c==="?"||c==="…");
       if(!isEnd)continue;
       /* 小数保护：3.14 不切 */
@@ -862,6 +884,8 @@ function closeSheet(){
 function shortName(n){return n&&n.length>8?n.slice(0,8)+"…":n;}
 function renderEngine(){
   document.querySelectorAll(".engine-btn").forEach(b=>b.classList.toggle("on",b.dataset.engine===S.engine));
+  const kb=$("kidBtn");
+  if(kb)kb.classList.toggle("on",S.kid);
   const hint=$("engineHint");
   if(hint)hint.style.display=(S.engine==="baidu")?"none":"block";
 }
@@ -898,6 +922,12 @@ $("btnVoice").addEventListener("click",()=>{
   $("voiceSheet").classList.add("show");$("mask").classList.add("show");
 });
 $("voiceClose").addEventListener("click",closeVoice);
+$("kidBtn").addEventListener("click",()=>{
+  S.kid=!S.kid;
+  try{localStorage.setItem("er_kid",S.kid?"1":"0");}catch(e){}
+  renderEngine();
+  toast(S.kid?"已开启童声（音调更高，配合系统语音使用）":"已关闭童声");
+});
 document.querySelectorAll(".engine-btn").forEach(b=>{
   b.addEventListener("click",()=>{
     S.engine=b.dataset.engine;
