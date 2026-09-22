@@ -362,9 +362,9 @@
     <div class="sheet-title">选择朗读音色</div>
     <div class="engine-row" id="engineRow">
       <button class="engine-btn" data-engine="system">系统语音</button>
-      <button class="engine-btn" data-engine="baidu">在线真人</button>
+      <button class="engine-btn" data-engine="google">谷歌真人</button>
     </div>
-    <p class="engine-hint" id="engineHint">在线真人：整句连读更自然，需要联网；失败会自动切回系统语音。</p>
+    <p class="engine-hint" id="engineHint">谷歌真人：谷歌 TTS 音源，整句连读更自然；失败会自动切回系统语音。</p>
     <div class="kid-row">
       <button class="kid-btn" id="kidBtn">童声模式（音调更高）</button>
     </div>
@@ -394,7 +394,7 @@ const S = {
   curAudio:null,
   kid:false
 };
-try{S.engine=localStorage.getItem("er_engine")||"system";}catch(e){}
+try{let _e=localStorage.getItem("er_engine");if(_e==="baidu")_e="google";S.engine=_e||"system";}catch(e){}
 try{S.kid=localStorage.getItem("er_kid")==="1";}catch(e){}
 const SPEEDS=[0.6,0.8,1.0,1.2];
 const FONTS=[18,21,25,29];
@@ -442,13 +442,15 @@ function speak(text,onEnd,onBoundary){
 }
 
 function speakRemote(text,onEnd){
-  const url="https://fanyi.baidu.com/gettts?lan=en&text="+encodeURIComponent(text)+"&spd=3&source=web";
+  /* 谷歌 TTS：免费、真人感强；长文本会被截断，超过 180 字符退回系统语音 */
+  if(text.length>180){speak(text,onEnd);return;}
+  const url="https://translate.googleapis.com/translate_tts?ie=UTF-8&q="+encodeURIComponent(text)+"&tl=en&client=tw-ob";
   let ended=false;
   const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
   const fallback=()=>{if(ended)return;ended=true;toast("在线语音加载失败，已切换系统语音");speak(text,onEnd);};
   try{
     const a=new Audio(url);
-    a.referrerPolicy="no-referrer"; /* 关键：不带 Referer，百度才会返回真实音频 */
+    a.referrerPolicy="no-referrer"; /* 关键：不带 Referer，谷歌/百度才会返回真实音频 */
     a.preload="auto";
     a.playbackRate=S.speed;
     S.curAudio=a;
@@ -642,7 +644,7 @@ function playOne(i,onDone){
     if(onDone)onDone();
   };
   /* 整句一次朗读：连贯自然（不再逐块断开）；桌面 Chrome 可逐词高亮，iOS 整句高亮 */
-  if(S.engine==="baidu"){
+  if(S.engine==="google"){
     speakRemote(S.sents[i],done);
   }else{
     speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
@@ -887,7 +889,7 @@ function renderEngine(){
   const kb=$("kidBtn");
   if(kb)kb.classList.toggle("on",S.kid);
   const hint=$("engineHint");
-  if(hint)hint.style.display=(S.engine==="baidu")?"none":"block";
+  if(hint)hint.style.display=(S.engine==="google")?"none":"block";
 }
 function renderVoices(){
   renderEngine();
@@ -933,7 +935,7 @@ document.querySelectorAll(".engine-btn").forEach(b=>{
     S.engine=b.dataset.engine;
     try{localStorage.setItem("er_engine",S.engine);}catch(e){}
     renderEngine();
-    toast(S.engine==="baidu"?"已切换：在线真人语音（整句连读）":"已切换：系统语音");
+    toast(S.engine==="google"?"已切换：谷歌真人语音（整句连读）":"已切换：系统语音");
   });
 });
 
