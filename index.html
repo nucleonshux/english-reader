@@ -410,51 +410,56 @@ function speak(text,onEnd){
 /* ========== 句子切分 ========== */
 const ABBR=/\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Ave|Blvd|Rd|Ltd|Inc|Co|Corp|Jr|Sr|vs|etc|e\.g|i\.e|no|fig|approx|dept|est|min|max|hr|sec|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun|U\.S|U\.K|U\.N|Ph\.D|M\.D)\.\s*$/i;
 function splitLong(s){
-  if(s.split(/\s+/).length<=55)return[s];
-  const toks=s.split(/(, |; |: | and | but | or | so | then )/);
-  const out=[];let buf="";
-  for(const t of toks){
-    if(!t)continue;
-    if(!buf){buf=t.trim();continue;}
-    const cand=(buf+" "+t).trim();
-    if(cand.split(/\s+/).length>45){out.push(buf);buf=t.trim();}
-    else buf=cand;
+  const words=s.split(/\s+/);
+  if(words.length<=55)return[s];
+  const out=[];let cur=[];
+  for(const w of words){
+    cur.push(w);
+    if(cur.length>45){
+      let cut=cur.length;
+      for(let k=cur.length-1;k>0;k--){
+        if(/[,;:]$/.test(cur[k-1])){cut=k;break;}
+        if(/^(and|but|or|so|then)$/i.test(cur[k])){cut=k+1;break;}
+      }
+      if(cut===cur.length)cut=Math.floor(cur.length*0.8);
+      out.push(cur.slice(0,cut).join(" "));
+      cur=cur.slice(cut);
+    }
   }
-  if(buf.trim())out.push(buf.trim());
+  if(cur.length)out.push(cur.join(" "));
   return out;
 }
 function splitSentences(text){
   if(!text||!text.trim())return[];
-  const t=text.replace(/\r\n/g,"\n").replace(/\r/g,"\n");
-  const out=[];
-  for(const lineRaw of t.split("\n")){
-    const line=lineRaw.trim();
-    if(!line)continue;
-    const chars=line.split("");
-    let buf="";
-    for(let i=0;i<chars.length;i++){
-      buf+=chars[i];
-      const c=chars[i];
-      const isEnd=(c==="."||c==="!"||c==="?"||c==="…");
-      if(!isEnd)continue;
-      /* 小数保护：3.14 不切 */
-      if(c==="."){
-        const prev=buf[buf.length-2];
-        const afterRest=chars.slice(i+1).join("").replace(/^\s+/,"");
-        if(prev&&/\d/.test(prev)&&/^\d/.test(afterRest))continue;
-      }
-      /* 吃进句尾引号 / 右括号 */
-      let j=i+1;
-      while(j<chars.length&&/["')\]]/.test(chars[j])){buf+=chars[j];j++;}
-      const rest=chars.slice(j).join("").replace(/^\s+/,"");
-      const followedBySentence=(rest===""||/^[A-Z0-9"'(]/.test(rest));
-      const isAbbr=ABBR.test(buf.replace(/["')\]]+$/,""));
-      if(!isAbbr&&followedBySentence){ out.push(buf.trim()); buf=""; }
-      i=j-1;
+  /* 换行折叠为空格：txt 里一行可能只是半句（书籍排版断行），
+     只有遇到句末标点（. ! ? …）才真正断句，否则跨行合并 */
+  const t0=text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").replace(/\n+/g," ");
+  /* 点缩写保护：U.S. / e.g. / Ph.D. 等 A.B. 模式换成哨兵，避免在中间点断句 */
+  const t=t0.replace(/(\b[A-Za-z](?:\.[A-Za-z])+\.)/g,m=>"\u0001"+m.replace(/\./g,"\u0002")+"\u0001");
+  const chars=t.split("");
+  const out=[];let buf="";
+  for(let i=0;i<chars.length;i++){
+    buf+=chars[i];
+    const c=chars[i];
+    const isEnd=(c==="."||c==="!"||c==="?"||c==="…");
+    if(!isEnd)continue;
+    /* 小数保护：3.14 不切 */
+    if(c==="."){
+      const prev=buf[buf.length-2];
+      const afterRest=chars.slice(i+1).join("").replace(/^\s+/,"");
+      if(prev&&/\d/.test(prev)&&/^\d/.test(afterRest))continue;
     }
-    if(buf.trim())out.push(buf.trim());
+    /* 吃进句尾引号 / 右括号 */
+    let j=i+1;
+    while(j<chars.length&&/["')\]]/.test(chars[j])){buf+=chars[j];j++;}
+    const rest=chars.slice(j).join("").replace(/^\s+/,"");
+    const followedBySentence=(rest===""||/^[A-Z0-9"'(]/.test(rest));
+    const isAbbr=ABBR.test(buf.replace(/["')\]]+$/,""));
+    if(!isAbbr&&followedBySentence){ out.push(buf.trim()); buf=""; }
+    i=j-1;
   }
-  const cleaned=out.map(s=>s.replace(/\s+/g," ").trim()).filter(Boolean);
+  if(buf.trim())out.push(buf.trim());
+  const cleaned=out.map(s=>s.replace(/\s+/g," ").trim().replace(/\u0001/g,"").replace(/\u0002/g,".")).filter(Boolean);
   const final=[];
   for(const s of cleaned)final.push(...splitLong(s));
   return final;
