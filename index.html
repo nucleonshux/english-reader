@@ -362,9 +362,9 @@
     <div class="sheet-title">选择朗读音色</div>
     <div class="engine-row" id="engineRow">
       <button class="engine-btn" data-engine="system">系统语音</button>
-      <button class="engine-btn" data-engine="google">谷歌真人</button>
+      <button class="engine-btn" data-engine="google">谷歌音色</button>
     </div>
-    <p class="engine-hint" id="engineHint">谷歌真人：谷歌 TTS 音源，整句连读更自然；失败会自动切回系统语音。</p>
+    <p class="engine-hint" id="engineHint">谷歌音色：优先使用系统里的 Google 语音（无需联网）；未安装时用默认英语语音。</p>
     <div class="kid-row">
       <button class="kid-btn" id="kidBtn">童声模式（音调更高）</button>
     </div>
@@ -416,6 +416,11 @@ function pickVoice(){
     const f=voices.find(v=>v.name===S.voiceName);
     if(f)return f;
   }
+  /* 谷歌音色引擎：优先使用系统自带的 Google 语音（Chrome/Edge/Android 自带，无需联网） */
+  if(S.engine==="google"){
+    const g=voices.filter(v=>/^Google/i.test(v.name));
+    if(g.length)return g[0];
+  }
   const en=voices.filter(v=>/^en/i.test(v.lang));
   if(!en.length)return null;
   const pref=["Samantha","Alex","Daniel","Karen","Moira","Fiona","Google US English","Microsoft Zira","Microsoft Aria","Microsoft Guy","Microsoft David","Microsoft Jenny"];
@@ -439,26 +444,6 @@ function speak(text,onEnd,onBoundary){
   /* 桌面 Chrome 支持 boundary 逐词事件；iOS 不触发，退化为整句高亮 */
   if(onBoundary)u.onboundary=function(e){onBoundary(e.charIndex||0);};
   speechSynthesis.speak(u);
-}
-
-function speakRemote(text,onEnd){
-  /* 谷歌 TTS：免费、真人感强；长文本会被截断，超过 180 字符退回系统语音 */
-  if(text.length>180){speak(text,onEnd);return;}
-  const url="https://translate.googleapis.com/translate_tts?ie=UTF-8&q="+encodeURIComponent(text)+"&tl=en&client=tw-ob";
-  let ended=false;
-  const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
-  const fallback=()=>{if(ended)return;ended=true;toast("在线语音加载失败，已切换系统语音");speak(text,onEnd);};
-  try{
-    const a=new Audio(url);
-    a.referrerPolicy="no-referrer"; /* 关键：不带 Referer，谷歌/百度才会返回真实音频 */
-    a.preload="auto";
-    a.playbackRate=S.speed;
-    S.curAudio=a;
-    a.onended=doneOnce;
-    a.onerror=fallback;
-    const pr=a.play();
-    if(pr&&pr.catch)pr.catch(fallback);
-  }catch(e){fallback();}
 }
 
 /* ========== 句子切分 ========== */
@@ -514,10 +499,15 @@ function splitSentences(text){
     for(let i=0;i<chars.length;i++){
       buf+=chars[i];
       const c=chars[i];
-      /* 逗号/分号/冒号：按逗号断句，但逗号前词数不足时不切（并入后续） */
+      /* 逗号/分号/冒号：按逗号断句，但需同时满足：
+         ① 逗号前词数 >= MIN_COMMA_WORDS；
+         ② 逗号后到下一个标点不止 1-3 个词（防止 "..., too." / "..., however," 这类短尾巴被单独裁掉） */
       if(c===","||c===";"||c===":"){
         const cnt=buf.replace(/[;,:\s]+$/,"").trim().split(/\s+/).filter(Boolean).length;
-        if(cnt>=MIN_COMMA_WORDS){ out.push(buf.trim()); buf=""; }
+        let kk=i+1;
+        while(kk<chars.length&&!/[.!,?;:\n…]/.test(chars[kk])){kk++;}
+        const after=kk>i+1?chars.slice(i+1,kk).join("").trim().split(/\s+/).filter(Boolean).length:0;
+        if(cnt>=MIN_COMMA_WORDS&&after>3){ out.push(buf.trim()); buf=""; }
         continue;
       }
       const isEnd=(c==="."||c==="!"||c==="?"||c==="…");
@@ -643,12 +633,8 @@ function playOne(i,onDone){
     card.querySelectorAll(".w.hl").forEach(w=>w.classList.remove("hl"));
     if(onDone)onDone();
   };
-  /* 整句一次朗读：连贯自然（不再逐块断开）；桌面 Chrome 可逐词高亮，iOS 整句高亮 */
-  if(S.engine==="google"){
-    speakRemote(S.sents[i],done);
-  }else{
-    speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
-  }
+  /* 整句一次朗读：连贯自然；桌面 Chrome 可逐词高亮，iOS 整句高亮 */
+  speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
 }
 function toggleSentence(i){
   if(S.playing===i){stopAll();return;}
@@ -935,7 +921,7 @@ document.querySelectorAll(".engine-btn").forEach(b=>{
     S.engine=b.dataset.engine;
     try{localStorage.setItem("er_engine",S.engine);}catch(e){}
     renderEngine();
-    toast(S.engine==="google"?"已切换：谷歌真人语音（整句连读）":"已切换：系统语音");
+    toast(S.engine==="google"?"已切换：谷歌音色（Google 语音）":"已切换：系统语音");
   });
 });
 
