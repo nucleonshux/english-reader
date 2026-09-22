@@ -74,6 +74,15 @@
   .chip svg{width:16px;height:16px;flex:0 0 auto}
   .chip-group{display:flex;gap:8px;flex-wrap:wrap}
   .chip-group .lbl{font-size:12px;color:var(--ink-soft);align-self:center;font-weight:600}
+.engine-row{display:flex;gap:10px;margin-bottom:10px}
+.engine-btn{
+  flex:1;padding:12px 8px;border-radius:14px;border:2px solid var(--line);
+  background:var(--paper);font-size:15px;font-weight:700;color:var(--ink);
+  transition:transform .12s ease;
+}
+.engine-btn.on{border-color:var(--coral);background:var(--coral);color:#fff}
+.engine-btn:active{transform:scale(.95)}
+.engine-hint{font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5}
   .jump-wrap{
     display:inline-flex;align-items:center;gap:4px;
     background:var(--paper);border:1px solid var(--line);border-radius:999px;
@@ -343,6 +352,11 @@
   <div class="grab"></div>
   <div class="sheet-inner">
     <div class="sheet-title">选择朗读音色</div>
+    <div class="engine-row" id="engineRow">
+      <button class="engine-btn" data-engine="system">系统语音</button>
+      <button class="engine-btn" data-engine="baidu">在线真人</button>
+    </div>
+    <p class="engine-hint" id="engineHint">在线真人：整句连读更自然，需要联网；失败会自动切回系统语音。</p>
     <div id="voiceList"></div>
     <p class="sheet-tip">提示：iPad 可免费下载更多英语语音：「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」里下载后，回来就能看到新音色。</p>
     <button class="w-close" id="voiceClose">关闭</button>
@@ -364,8 +378,11 @@ const S = {
   playAll:false,
   wordTimer:null,
   curWord:"",
-  voiceName:""
+  voiceName:"",
+  engine:"system",
+  curAudio:null
 };
+try{S.engine=localStorage.getItem("er_engine")||"system";}catch(e){}
 const SPEEDS=[0.6,0.8,1.0,1.2];
 const FONTS=[18,21,25,29];
 const FONT_LBL=["小","标准","大","特大"];
@@ -392,10 +409,9 @@ function pickVoice(){
   for(const p of pref){const f=en.find(v=>v.name===p);if(f)return f;}
   return en.find(v=>/en-US/i.test(v.lang))||en[0];
 }
-function speak(text,onEnd){
+function speak(text,onEnd,onBoundary){
   if(typeof speechSynthesis==="undefined"){toast("当前设备不支持朗读");return;}
-  /* 不在这里 cancel：分块朗读靠队列顺序连续发声，cancel 会误杀排队中的下一块/下一句，
-     打断统一由 stopAll() 负责 */
+  /* 不在这里 cancel：整句/连读顺序由队列保证，打断统一由 stopAll() 负责 */
   const u=new SpeechSynthesisUtterance(text);
   u.lang="en-US";
   const v=pickVoice();if(v)u.voice=v;
@@ -407,7 +423,26 @@ function speak(text,onEnd){
   const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
   u.onend=function(){if(kick)clearInterval(kick);doneOnce();};
   u.onerror=function(){doneOnce();};
+  /* 桌面 Chrome 支持 boundary 逐词事件；iOS 不触发，退化为整句高亮 */
+  if(onBoundary)u.onboundary=function(e){onBoundary(e.charIndex||0);};
   speechSynthesis.speak(u);
+}
+
+function speakRemote(text,onEnd){
+  const url="https://fanyi.baidu.com/gettts?lan=en&text="+encodeURIComponent(text)+"&spd=3&source=web";
+  let ended=false;
+  const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
+  const fallback=()=>{if(ended)return;ended=true;speak(text,onEnd);};
+  try{
+    const a=new Audio(url);
+    a.preload="auto";
+    a.playbackRate=S.speed;
+    S.curAudio=a;
+    a.onended=doneOnce;
+    a.onerror=fallback;
+    const pr=a.play();
+    if(pr&&pr.catch)pr.catch(fallback);
+  }catch(e){fallback();}
 }
 
 /* ========== 句子切分 ========== */
@@ -560,43 +595,36 @@ function splitChunks(text){
   if(cur.length)chunks.push(cur);
   return chunks;
 }
+function highlightAt(card,ci){
+  const words=card.querySelectorAll(".w");
+  let acc=0,hit=false;
+  for(const w of words){
+    w.classList.remove("hl");
+    if(!hit){
+      const len=w.dataset.w.length;
+      if(ci>=acc&&ci<acc+len){w.classList.add("hl");hit=true;}
+      acc+=len+1;
+    }
+  }
+}
 function playOne(i,onDone){
   stopAll();
   S.playing=i;
   const card=document.querySelector(`.sent[data-i="${i}"]`);
   if(!card){if(onDone)onDone();return;}
   card.classList.add("playing");
-  const words=card.querySelectorAll(".w");
-  const chunks=splitChunks(S.sents[i]);
-  let ci=0;
-  const playChunk=()=>{
+  const done=()=>{
     if(S.playing!==i)return;
-    if(ci>=chunks.length){if(onDone)onDone();return;}
-    const ch=chunks[ci];
-    const keys=new Set(ch.map(t=>t.replace(/[^\w'-]+/g,"").toLowerCase()));
-    const chWords=[];
-    for(const w of words){
-      const k=w.dataset.w.replace(/[^\w'-]+/g,"").toLowerCase();
-      if(keys.has(k))chWords.push(w);
-    }
-    clearHl();
-    let wi2=0;
-    const step=()=>{
-      if(S.playing!==i)return;
-      for(const w of words)w.classList.remove("hl");
-      const upto=Math.min(wi2+1,chWords.length);
-      for(let k=0;k<upto;k++)chWords[k].classList.add("hl");
-      if(wi2>=chWords.length){clearHl();return;}
-      wi2++;
-    };
-    step();
-    hlTimer=setInterval(step,Math.max(130,Math.round(1000/chWords.length)));
-    speak(ch.join(" "),()=>{
-      if(S.playing!==i)return;
-      clearHl();ci++;playChunk();
-    });
+    card.classList.remove("playing");
+    card.querySelectorAll(".w.hl").forEach(w=>w.classList.remove("hl"));
+    if(onDone)onDone();
   };
-  setTimeout(playChunk,120);
+  /* 整句一次朗读：连贯自然（不再逐块断开）；桌面 Chrome 可逐词高亮，iOS 整句高亮 */
+  if(S.engine==="baidu"){
+    speakRemote(S.sents[i],done);
+  }else{
+    speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
+  }
 }
 function toggleSentence(i){
   if(S.playing===i){stopAll();return;}
@@ -605,6 +633,7 @@ function toggleSentence(i){
 }
 function stopAll(){
   clearHl();
+  if(S.curAudio){try{S.curAudio.pause();}catch(e){}S.curAudio=null;}
   if(typeof speechSynthesis!=="undefined")speechSynthesis.cancel();
   document.querySelectorAll(".sent.playing").forEach(c=>c.classList.remove("playing"));
   document.querySelectorAll(".w.hl").forEach(w=>w.classList.remove("hl"));
@@ -831,7 +860,13 @@ function closeSheet(){
   stopWordAudio();
 }
 function shortName(n){return n&&n.length>8?n.slice(0,8)+"…":n;}
+function renderEngine(){
+  document.querySelectorAll(".engine-btn").forEach(b=>b.classList.toggle("on",b.dataset.engine===S.engine));
+  const hint=$("engineHint");
+  if(hint)hint.style.display=(S.engine==="baidu")?"none":"block";
+}
 function renderVoices(){
+  renderEngine();
   const list=$("voiceList");
   if(!list)return;
   const en=voices.filter(v=>/^en/i.test(v.lang));
@@ -863,6 +898,14 @@ $("btnVoice").addEventListener("click",()=>{
   $("voiceSheet").classList.add("show");$("mask").classList.add("show");
 });
 $("voiceClose").addEventListener("click",closeVoice);
+document.querySelectorAll(".engine-btn").forEach(b=>{
+  b.addEventListener("click",()=>{
+    S.engine=b.dataset.engine;
+    try{localStorage.setItem("er_engine",S.engine);}catch(e){}
+    renderEngine();
+    toast(S.engine==="baidu"?"已切换：在线真人语音（整句连读）":"已切换：系统语音");
+  });
+});
 
 /* ========== 文件读取 ========== */
 $("fileInput").addEventListener("change",ev=>{
