@@ -403,8 +403,10 @@ function speak(text,onEnd){
   u.pitch=1;
   const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent||"");
   const kick=isIOS?setInterval(()=>{if(!speechSynthesis.speaking){clearInterval(kick);}else{speechSynthesis.resume();}},6500):null;
-  u.onend=function(){if(kick)clearInterval(kick);if(onEnd)onEnd();};
-  u.onerror=function(){if(onEnd)onEnd();};
+  let ended=false;
+  const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
+  u.onend=function(){if(kick)clearInterval(kick);doneOnce();};
+  u.onerror=function(){doneOnce();};
   speechSynthesis.speak(u);
 }
 
@@ -568,7 +570,7 @@ function playOne(i,onDone){
   const chunks=splitChunks(S.sents[i]);
   let ci=0;
   const playChunk=()=>{
-    if(S.playing!==i){if(onDone)onDone();return;}
+    if(S.playing!==i)return;
     if(ci>=chunks.length){if(onDone)onDone();return;}
     const ch=chunks[ci];
     const keys=new Set(ch.map(t=>t.replace(/[^\w'-]+/g,"").toLowerCase()));
@@ -589,7 +591,10 @@ function playOne(i,onDone){
     };
     step();
     hlTimer=setInterval(step,Math.max(130,Math.round(1000/chWords.length)));
-    speak(ch.join(" "),()=>{clearHl();ci++;playChunk();});
+    speak(ch.join(" "),()=>{
+      if(S.playing!==i)return;
+      clearHl();ci++;playChunk();
+    });
   };
   setTimeout(playChunk,120);
 }
@@ -615,7 +620,7 @@ function playNext(i){
   if(!S.playAll||i>=S.sents.length){
     stopAll();S.playAll=false;$("btnPlayAll").classList.remove("on");return;
   }
-  playOne(i,()=>{if(S.playAll)playNext(i+1);});
+  playOne(i,()=>{if(S.playAll&&S.playing===i)playNext(i+1);});
 }
 
 /* ========== 单词查询与抽屉 ========== */
