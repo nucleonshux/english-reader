@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -83,6 +84,14 @@
 .engine-btn.on{border-color:var(--coral);background:var(--coral);color:#fff}
 .engine-btn:active{transform:scale(.95)}
 .engine-hint{font-size:12px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5}
+.relay-row{display:none;flex-direction:column;gap:6px;margin-bottom:12px}
+.relay-row.show{display:flex}
+.relay-row label{font-size:12px;color:var(--ink-soft);font-weight:600}
+.relay-row input{
+  padding:9px 12px;border-radius:12px;border:2px solid var(--line);
+  background:#fff;font-size:14px;color:var(--ink);width:100%;box-sizing:border-box;
+}
+.relay-row input:focus{outline:none;border-color:var(--sky)}
 .kid-row{margin-bottom:12px}
 .kid-btn{
   width:100%;padding:10px;border-radius:14px;border:2px solid var(--line);
@@ -362,9 +371,16 @@
     <div class="sheet-title">选择朗读音色</div>
     <div class="engine-row" id="engineRow">
       <button class="engine-btn" data-engine="system">系统语音</button>
-      <button class="engine-btn" data-engine="google">谷歌音色</button>
+      <button class="engine-btn" data-engine="google">谷歌真人</button>
+      <button class="engine-btn" data-engine="relay">自定义中继</button>
     </div>
-    <p class="engine-hint" id="engineHint">谷歌音色：优先使用系统里的 Google 语音（无需联网）；未安装时用默认英语语音。</p>
+    <p class="engine-hint" id="engineHint">谷歌真人：谷歌在线 TTS 真人音色；需联网，失败自动切回系统语音。</p>
+    <div class="relay-row" id="relayRow">
+      <label>配音 TTS 中继地址（iPad 上填电脑局域网 IP，如 http://192.168.1.5:8899）</label>
+      <input id="relayBase" type="text" value="http://localhost:8899">
+      <label>朗读音色</label>
+      <input id="relayVoice" type="text" value="Ava">
+    </div>
     <div class="kid-row">
       <button class="kid-btn" id="kidBtn">童声模式（音调更高）</button>
     </div>
@@ -392,10 +408,14 @@ const S = {
   voiceName:"",
   engine:"system",
   curAudio:null,
-  kid:false
+  kid:false,
+  relayBase:"http://localhost:8899",
+  relayVoice:"Ava"
 };
 try{let _e=localStorage.getItem("er_engine");if(_e==="baidu")_e="google";S.engine=_e||"system";}catch(e){}
 try{S.kid=localStorage.getItem("er_kid")==="1";}catch(e){}
+try{S.relayBase=localStorage.getItem("er_relay")||"http://localhost:8899";}catch(e){}
+try{S.relayVoice=localStorage.getItem("er_relayvoice")||"Ava";}catch(e){}
 const SPEEDS=[0.6,0.8,1.0,1.2];
 const FONTS=[18,21,25,29];
 const FONT_LBL=["小","标准","大","特大"];
@@ -444,6 +464,44 @@ function speak(text,onEnd,onBoundary){
   /* 桌面 Chrome 支持 boundary 逐词事件；iOS 不触发，退化为整句高亮 */
   if(onBoundary)u.onboundary=function(e){onBoundary(e.charIndex||0);};
   speechSynthesis.speak(u);
+}
+
+function speakRemote(text,onEnd){
+  /* 谷歌 TTS 在线：真人音色；长文本会被截断，超过 180 字符退回系统语音 */
+  if(text.length>180){speak(text,onEnd);return;}
+  const url="https://translate.googleapis.com/translate_tts?ie=UTF-8&q="+encodeURIComponent(text)+"&tl=en&client=tw-ob";
+  let ended=false;
+  const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
+  const fallback=()=>{if(ended)return;ended=true;toast("在线语音加载失败，已切换系统语音");speak(text,onEnd);};
+  try{
+    const a=new Audio(url);
+    a.referrerPolicy="no-referrer";
+    a.preload="auto";
+    a.playbackRate=S.speed;
+    S.curAudio=a;
+    a.onended=doneOnce;
+    a.onerror=fallback;
+    const pr=a.play();
+    if(pr&&pr.catch)pr.catch(fallback);
+  }catch(e){fallback();}
+}
+function playRelay(text,onEnd){
+  /* 自定义 TTS 中继（如 Edge-TTS 本地服务）：{地址}?text=..&voice=.. 返回音频 */
+  let ended=false;
+  const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
+  const fallback=()=>{if(ended)return;ended=true;toast("中继语音加载失败，已切换系统语音");speak(text,onEnd);};
+  try{
+    const url=S.relayBase+(S.relayBase.indexOf("?")>=0?"&":"?")+"text="+encodeURIComponent(text)+"&voice="+encodeURIComponent(S.relayVoice);
+    const a=new Audio(url);
+    a.referrerPolicy="no-referrer";
+    a.preload="auto";
+    a.playbackRate=S.speed;
+    S.curAudio=a;
+    a.onended=doneOnce;
+    a.onerror=fallback;
+    const pr=a.play();
+    if(pr&&pr.catch)pr.catch(fallback);
+  }catch(e){fallback();}
 }
 
 /* ========== 句子切分 ========== */
@@ -634,7 +692,13 @@ function playOne(i,onDone){
     if(onDone)onDone();
   };
   /* 整句一次朗读：连贯自然；桌面 Chrome 可逐词高亮，iOS 整句高亮 */
-  speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
+  if(S.engine==="google"){
+    speakRemote(S.sents[i],done);
+  }else if(S.engine==="relay"){
+    playRelay(S.sents[i],done);
+  }else{
+    speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
+  }
 }
 function toggleSentence(i){
   if(S.playing===i){stopAll();return;}
@@ -874,8 +938,15 @@ function renderEngine(){
   document.querySelectorAll(".engine-btn").forEach(b=>b.classList.toggle("on",b.dataset.engine===S.engine));
   const kb=$("kidBtn");
   if(kb)kb.classList.toggle("on",S.kid);
+  const rr=$("relayRow");
+  if(rr){
+    rr.classList.toggle("show",S.engine==="relay");
+    const rb=$("relayBase"),rv=$("relayVoice");
+    if(rb)rb.value=S.relayBase;
+    if(rv)rv.value=S.relayVoice;
+  }
   const hint=$("engineHint");
-  if(hint)hint.style.display=(S.engine==="google")?"none":"block";
+  if(hint)hint.style.display=(S.engine==="google")?"block":"none";
 }
 function renderVoices(){
   renderEngine();
@@ -910,6 +981,14 @@ $("btnVoice").addEventListener("click",()=>{
   $("voiceSheet").classList.add("show");$("mask").classList.add("show");
 });
 $("voiceClose").addEventListener("click",closeVoice);
+$("relayBase").addEventListener("change",()=>{
+  S.relayBase=($("relayBase").value||"").trim()||"http://localhost:8899";
+  try{localStorage.setItem("er_relay",S.relayBase);}catch(e){}
+});
+$("relayVoice").addEventListener("change",()=>{
+  S.relayVoice=($("relayVoice").value||"").trim()||"Ava";
+  try{localStorage.setItem("er_relayvoice",S.relayVoice);}catch(e){}
+});
 $("kidBtn").addEventListener("click",()=>{
   S.kid=!S.kid;
   try{localStorage.setItem("er_kid",S.kid?"1":"0");}catch(e){}
@@ -921,7 +1000,7 @@ document.querySelectorAll(".engine-btn").forEach(b=>{
     S.engine=b.dataset.engine;
     try{localStorage.setItem("er_engine",S.engine);}catch(e){}
     renderEngine();
-    toast(S.engine==="google"?"已切换：谷歌音色（Google 语音）":"已切换：系统语音");
+    toast(S.engine==="google"?"已切换：谷歌真人（在线）":S.engine==="relay"?"已切换：自定义中继 · "+S.relayVoice:"已切换：系统语音");
   });
 });
 
