@@ -271,6 +271,12 @@
     .logo h1{font-size:17px}
     .logo .sub{display:none}
   }
+.online-note{
+  display:none;margin:10px 0;padding:10px 12px;border-radius:12px;
+  background:#fff7ed;border:2px solid #fed7aa;color:#9a3412;
+  font-size:13px;line-height:1.5;
+}
+.online-note.show{display:block}
 </style>
 </head>
 <body>
@@ -369,8 +375,9 @@
     <div class="kid-row">
       <button class="kid-btn" id="kidBtn">童声模式（音调更高）</button>
     </div>
+    <div id="onlineNote" class="online-note">真人语音：正在使用<b>百度在线真人音色</b>（整句连贯、国内免费、需联网）。下方系统语音列表无需选择；网络不通时自动回退系统音色。</div>
     <div id="voiceList"></div>
-    <p class="sheet-tip">提示：iPad 可免费下载更多英语语音：「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」里下载后，回来就能看到新音色。</p>
+    <p class="sheet-tip">提示：iPad 可免费下载更多英语语音：「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」里下载后，回来就能看到新音色。（版本 v9）</p>
     <button class="w-close" id="voiceClose">关闭</button>
   </div>
 </div>
@@ -451,31 +458,42 @@ function speak(text,onEnd,onBoundary){
 
 function playBaidu(text,onEnd){
   /* 百度在线真人音色（gettts：国内免费、稳定、无需 key、整句连贯不变调）。
-     失败自动尝试谷歌在线，再失败回退系统语音 */
+     失败重试一次，再回退谷歌在线，最后回退系统语音 */
   if(text.length>180){playGoogle(text,onEnd);return;}
-  let ended=false;
+  let ended=false,attempt=0;
   const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
   const fallback=()=>{if(ended)return;ended=true;playGoogle(text,onEnd);};
-  try{
-    /* spd 越小越慢：0.8 倍速(默认)用 2 档慢读，正常用 3 */
-    const spd=S.speed<=0.8?2:(S.speed<=1.1?3:4);
-    const url="https://fanyi.baidu.com/gettts?lan=en&text="+encodeURIComponent(text)+"&spd="+spd+"&source=web";
-    const a=new Audio(url);
-    a.referrerPolicy="no-referrer";
-    a.preload="auto";
-    S.curAudio=a;
-    a.onended=doneOnce;
-    a.onerror=fallback;
-    const pr=a.play();
-    if(pr&&pr.catch)pr.catch(fallback);
-  }catch(e){fallback();}
+  const start=()=>{
+    if(ended)return;
+    attempt++;
+    try{
+      /* spd 越小越慢：0.8 倍速(默认)用 2 档慢读，正常用 3 */
+      const spd=S.speed<=0.8?2:(S.speed<=1.1?3:4);
+      const url="https://fanyi.baidu.com/gettts?lan=en&text="+encodeURIComponent(text)+"&spd="+spd+"&source=web";
+      const a=new Audio(url);
+      a.referrerPolicy="no-referrer";
+      a.preload="auto";
+      S.curAudio=a;
+      a.onended=doneOnce;
+      a.onerror=function(){
+        if(attempt<2){setTimeout(function(){if(!ended)start();},500);}
+        else{fallback();}
+      };
+      const pr=a.play();
+      if(pr&&pr.catch)pr.catch(function(){
+        if(attempt<2){setTimeout(function(){if(!ended)start();},500);}
+        else{fallback();}
+      });
+    }catch(e){if(attempt<2){setTimeout(function(){if(!ended)start();},500);}else{fallback();}}
+  };
+  start();
 }
 function playGoogle(text,onEnd){
   /* 谷歌在线音色（translate_tts）：百度不可达时的第二级在线兜底；也失败则切系统语音 */
   if(text.length>180){speak(text,onEnd);return;}
   let ended=false;
   const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
-  const fallback=()=>{if(ended)return;ended=true;toast("在线语音加载失败，已切换系统语音");speak(text,onEnd);};
+  const fallback=()=>{if(ended)return;ended=true;toast("在线语音不可用，已改用系统音色");speak(text,onEnd);};
   try{
     const url="https://translate.googleapis.com/translate_tts?ie=UTF-8&q="+encodeURIComponent(text)+"&tl=en&client=tw-ob";
     const a=new Audio(url);
@@ -931,6 +949,9 @@ function renderVoices(){
   renderEngine();
   const list=$("voiceList");
   if(!list)return;
+  const note=$("onlineNote");
+  if(note)note.classList.toggle("show",S.engine==="edge");
+  if(list)list.style.display=(S.engine==="edge")?"none":"";
   const en=voices.filter(v=>/^en/i.test(v.lang));
   const items=en.map(v=>{
     const on=S.voiceName===v.name;
@@ -971,7 +992,8 @@ document.querySelectorAll(".engine-btn").forEach(b=>{
     S.engine=b.dataset.engine;
     try{localStorage.setItem("er_engine",S.engine);}catch(e){}
     renderEngine();
-    toast(S.engine==="edge"?"已切换：真人语音（Ava 在线）":"已切换：系统语音");
+    renderVoices();
+    toast(S.engine==="edge"?"已切换：真人语音（百度在线）":"已切换：系统语音");
   });
 });
 
