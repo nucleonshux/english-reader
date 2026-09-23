@@ -185,11 +185,29 @@
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 6px rgba(63,185,140,.4);
   }
-  .speak-ico{
+.side-btns{
     position:absolute;right:12px;top:50%;transform:translateY(-50%);
+    display:flex;flex-direction:column;align-items:center;gap:7px;
+    pointer-events:none;
+  }
+  .speak-ico{
     width:38px;height:38px;border-radius:50%;
     background:var(--bg);display:flex;align-items:center;justify-content:center;
     color:var(--coral);border:1.5px solid var(--line);pointer-events:none;
+  }
+  .tr-btn{
+    pointer-events:auto;
+    width:38px;height:24px;border-radius:12px;border:none;cursor:pointer;
+    background:var(--mint);color:#fff;font-size:13px;font-weight:800;line-height:1;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 5px rgba(63,185,140,.35);
+    transition:transform .1s;
+  }
+  .tr-btn:active{transform:scale(.92)}
+  .tr-box{
+    margin:12px 54px 2px 0;padding:10px 12px;border-radius:10px;
+    background:#EFFAF5;border:1.5px solid #BCE7D6;color:#0F5132;
+    font-size:14px;font-weight:700;line-height:1.7;
   }
   .sent.playing .speak-ico{background:var(--coral);color:#fff;border-color:var(--coral)}
   .sent.playing .speak-ico svg{animation:pulse 1s ease-in-out infinite}
@@ -399,6 +417,7 @@ const S = {
   curWord:"",
   voiceName:"",
   engine:"system",
+  trCache:{},
   curAudio:null,
   kid:false,
   edgeCancel:false
@@ -614,15 +633,69 @@ function render(){
     const card=document.createElement("div");
     card.className="sent";card.dataset.i=i;
     card.style.fontSize=varFs()+"px";
-    card.innerHTML=`<span class="snum">${i+1}</span>`+wordSpans(s)+`<span class="speak-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></span>`;
+    card.innerHTML=`<span class="snum">${i+1}</span>`+wordSpans(s)+`<span class="side-btns"><span class="speak-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg></span><button class="tr-btn" data-i="${i}" title="翻译这句">译</button></span>`;
     card.addEventListener("click",ev=>{
       const w=ev.target.closest(".w");
       if(w){ev.stopPropagation();onWord(w.dataset.w,w,i);return;}
+      const tb=ev.target.closest(".tr-btn");
+      if(tb){ev.stopPropagation();toggleTranslate(+tb.dataset.i);return;}
       toggleSentence(i);
     });
     list.appendChild(card);
   });
   if(!S.sents.length){list.innerHTML=`<div class="empty">没有识别到句子。<br>请检查输入的是英文文本。</div>`;}
+}
+function localFallback(s){
+  /* 在线翻译不可用时的兜底：内置词典逐词释义（离线可用、永远可靠） */
+  const words=s.split(/\s+/).map(w=>w.replace(/[^a-zA-Z']/g,"")).filter(Boolean);
+  const parts=[];const seen={};
+  for(const raw of words){
+    const w=stem(raw.toLowerCase());
+    if(seen[w])continue;seen[w]=1;
+    const d=DICT[w];
+    if(d)parts.push(w+" "+d);
+    if(parts.length>=8)break;
+  }
+  return parts.length?("（词义参考）"+parts.join(" · ")):"";
+}
+function toggleTranslate(i){
+  const card=document.querySelector(`.sent[data-i="${i}"]`);
+  if(!card)return;
+  let box=card.querySelector(".tr-box");
+  if(box){box.remove();return;}
+  const s=S.sents[i];
+  if(!s)return;
+  box=document.createElement("div");
+  box.className="tr-box";
+  card.appendChild(box);
+  if(S.trCache[s]!==undefined){box.textContent=S.trCache[s];return;}
+  box.textContent="翻译中…";
+  const show=(txt)=>{if(card.contains(box))box.textContent=txt;};
+  /* 源1：MyMemory（国内可达，免费每日限量）；源2：谷歌（网络可达时使用） */
+  const srcMymemory=()=>{
+    fetch("https://api.mymemory.translated.net/get?q="+encodeURIComponent(s)+"&langpair=en|zh-CN")
+      .then(r=>{if(!r.ok)throw new Error("http "+r.status);return r.json();})
+      .then(d=>{
+        const t=d&&d.responseData&&d.responseData.translatedText;
+        if(!t||/^QUOTA/i.test(t)||/MYMEMORY WARNING/i.test(t))throw new Error("quota");
+        S.trCache[s]=t;show(t);
+      })
+      .catch(()=>srcGoogle(0));
+  };
+  const srcGoogle=(attempt)=>{
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),8000);
+    fetch("https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=zh-CN&q="+encodeURIComponent(s),{signal:ctrl.signal})
+      .then(r=>{clearTimeout(timer);if(!r.ok)throw new Error("http "+r.status);return r.json();})
+      .then(d=>{
+        const t=d&&d[0]&&d[0].map(x=>x[0]).join("");
+        if(!t)throw new Error("no result");
+        if(attempt<2&&/[.!?]$/.test(s)&&!/[。！？.!?]$/.test(t)){srcGoogle(attempt+1);return;}
+        S.trCache[s]=t;show(t);
+      })
+      .catch(()=>{clearTimeout(timer);show(localFallback(s)||"翻译服务暂时不可用，请检查网络后重试");});
+  };
+  srcMymemory();
 }
 function wordSpans(s){
   /* 把单词包进 span，标点留在词上便于高亮，去空格 */
