@@ -73,8 +73,33 @@
   .chip:active{transform:scale(.94)}
   .chip.on{background:var(--mint);border-color:var(--mint);color:#fff}
   .chip svg{width:16px;height:16px;flex:0 0 auto}
-  .chip-group{display:flex;gap:8px;flex-wrap:wrap}
+  .chip-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .chip-group + .chip-group{margin-left:6px}
   .chip-group .lbl{font-size:12px;color:var(--ink-soft);align-self:center;font-weight:600}
+  /* 手机：紧凑 */
+  @media (max-width:479px){
+    .bar{gap:8px}
+    .chip{padding:7px 11px;font-size:13px}
+    .chip-group{gap:6px}
+    .chip-group + .chip-group{margin-left:0}
+  }
+  /* iPad/小平板竖屏：放宽间距、加大触控目标 */
+  @media (min-width:480px) and (max-width:859px){
+    .bar{gap:12px}
+    .chip{padding:11px 18px;font-size:15px}
+    .chip-group{gap:10px}
+    .chip-group + .chip-group{margin-left:4px}
+    .logo h1{font-size:22px}
+    .logo-mark{width:46px;height:46px}
+    .jump-wrap{padding:4px 6px 4px 14px}
+    #jumpInput{width:64px;font-size:16px}
+    #btnJump{padding:7px 15px}
+  }
+  /* 桌面/横屏平板：顶栏一行宽松 */
+  @media (min-width:860px){
+    .bar{gap:14px}
+    .chip-group{gap:9px}
+  }
 .engine-row{display:flex;gap:10px;margin-bottom:10px}
 .engine-btn{
   flex:1;padding:12px 8px;border-radius:14px;border:2px solid var(--line);
@@ -114,6 +139,7 @@
   main{max-width:980px;margin:0 auto;padding:16px 16px calc(40px + var(--safe-bottom))}
   @media (min-width:860px){
     main{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:18px;align-items:start}
+    main.learn{display:block}
   }
 
   /* ===== 输入面板 ===== */
@@ -321,6 +347,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20 10 4h4l6 16"/><path d="M7 14h10"/></svg>
         <span id="fontLbl">标准</span>
       </button>
+    </div>
+    <div class="chip-group">
       <button class="chip" id="btnPlayAll" title="连续朗读所有句子">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
         连读
@@ -1103,6 +1131,7 @@ function startLearn(){
   render();
   $("inputPanel").classList.add("hidden");
   $("readPanel").classList.remove("hidden");
+  document.querySelector("main").classList.add("learn");
   try{localStorage.setItem("yd_text",text);}catch(e){}
   toast("已分成 "+S.sents.length+" 句");
 }
@@ -1110,6 +1139,7 @@ function backEdit(){
   stopAll();S.playAll=false;$("btnPlayAll").classList.remove("on");
   $("readPanel").classList.add("hidden");
   $("inputPanel").classList.remove("hidden");
+  document.querySelector("main").classList.remove("learn");
 }
 function clearAll(){
   stopAll();S.playAll=false;$("btnPlayAll").classList.remove("on");
