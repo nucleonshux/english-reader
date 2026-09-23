@@ -63,6 +63,11 @@
   }
   .logo h1{font-size:20px;font-weight:800;letter-spacing:.5px}
   .logo .sub{font-size:12px;color:var(--ink-soft);font-weight:500;line-height:1.3}
+  .ver-badge{
+    display:inline-block;vertical-align:2px;margin-left:6px;
+    font-size:10px;font-weight:800;color:#fff;background:var(--mint);
+    border-radius:8px;padding:2px 7px;letter-spacing:.5px;
+  }
   .chip{
     display:inline-flex;align-items:center;gap:6px;
     background:var(--paper);border:1px solid var(--line);border-radius:999px;
@@ -74,21 +79,21 @@
   .chip.on{background:var(--mint);border-color:var(--mint);color:#fff}
   .chip svg{width:16px;height:16px;flex:0 0 auto}
   .chip-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .chip-group + .chip-group{margin-left:6px}
+  .chip-group + .chip-group{margin-left:14px}
   .chip-group .lbl{font-size:12px;color:var(--ink-soft);align-self:center;font-weight:600}
   /* 手机：紧凑 */
   @media (max-width:479px){
     .bar{gap:8px}
     .chip{padding:7px 11px;font-size:13px}
     .chip-group{gap:6px}
-    .chip-group + .chip-group{margin-left:0}
+    .chip-group + .chip-group{margin-left:6px}
   }
   /* iPad/小平板竖屏：放宽间距、加大触控目标 */
   @media (min-width:480px) and (max-width:859px){
     .bar{gap:12px}
     .chip{padding:11px 18px;font-size:15px}
     .chip-group{gap:10px}
-    .chip-group + .chip-group{margin-left:4px}
+    .chip-group + .chip-group{margin-left:10px}
     .logo h1{font-size:22px}
     .logo-mark{width:46px;height:46px}
     .jump-wrap{padding:4px 6px 4px 14px}
@@ -331,7 +336,7 @@
       <div class="logo-mark">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3"/><path d="M4 12h9"/><path d="M8.5 9.5 12 13l-3.5 3.5"/></svg>
       </div>
-      <div><h1>英语点读小助手</h1><div class="sub">点句子朗读 · 点单词学释义</div></div>
+      <div><h1>英语点读小助手<span class="ver-badge">v10</span></h1><div class="sub">点句子朗读 · 点单词学释义</div></div>
     </div>
     <div class="chip-group">
       <span class="lbl">语速</span>
