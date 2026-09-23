@@ -365,7 +365,7 @@
       <button class="engine-btn" data-engine="system">系统语音</button>
       <button class="engine-btn" data-engine="edge">真人语音</button>
     </div>
-    <p class="engine-hint" id="engineHint">真人语音：微软 Ava 在线音色（免安装、需联网），失败自动切回系统语音。</p>
+    <p class="engine-hint" id="engineHint">真人语音：百度在线真人音色（国内免费、需联网、整句连贯），网络不通时自动切谷歌/系统语音。</p>
     <div class="kid-row">
       <button class="kid-btn" id="kidBtn">童声模式（音调更高）</button>
     </div>
@@ -449,75 +449,47 @@ function speak(text,onEnd,onBoundary){
   speechSynthesis.speak(u);
 }
 
-function _uuid4(){
-  if(crypto.randomUUID)return crypto.randomUUID();
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,function(c){var r=Math.random()*16|0,v=c==="x"?r:(r&0x3|0x8);return v.toString(16);});
+function playBaidu(text,onEnd){
+  /* 百度在线真人音色（gettts：国内免费、稳定、无需 key、整句连贯不变调）。
+     失败自动尝试谷歌在线，再失败回退系统语音 */
+  if(text.length>180){playGoogle(text,onEnd);return;}
+  let ended=false;
+  const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
+  const fallback=()=>{if(ended)return;ended=true;playGoogle(text,onEnd);};
+  try{
+    /* spd 越小越慢：0.8 倍速(默认)用 2 档慢读，正常用 3 */
+    const spd=S.speed<=0.8?2:(S.speed<=1.1?3:4);
+    const url="https://fanyi.baidu.com/gettts?lan=en&text="+encodeURIComponent(text)+"&spd="+spd+"&source=web";
+    const a=new Audio(url);
+    a.referrerPolicy="no-referrer";
+    a.preload="auto";
+    S.curAudio=a;
+    a.onended=doneOnce;
+    a.onerror=fallback;
+    const pr=a.play();
+    if(pr&&pr.catch)pr.catch(fallback);
+  }catch(e){fallback();}
 }
-function _ts(){return new Date().toISOString().replace("Z","+00:00");}
-function _ssml(text){
-  const esc=text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
-  const rate=Math.round((S.speed-1)*100)+"%";
-  return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='en-US-AvaNeural'><prosody pitch='+0Hz' rate='"+rate+"' volume='+0%'>"+esc+"</prosody></voice></speak>";
-}
-function playEdge(text,onEnd){
-  /* 微软 Edge TTS 免费在线：Ava 真人音色（WebSocket 直连，无需 key、无需本地服务） */
-  if(typeof WebSocket==="undefined"||typeof crypto==="undefined"||!crypto.subtle){speak(text,onEnd);return;}
-  if(text.length>800){speak(text,onEnd);return;} /* 超长回退系统语音 */
-  S.edgeCancel=false;
+function playGoogle(text,onEnd){
+  /* 谷歌在线音色（translate_tts）：百度不可达时的第二级在线兜底；也失败则切系统语音 */
+  if(text.length>180){speak(text,onEnd);return;}
   let ended=false;
   const doneOnce=()=>{if(ended)return;ended=true;if(onEnd)onEnd();};
   const fallback=()=>{if(ended)return;ended=true;toast("在线语音加载失败，已切换系统语音");speak(text,onEnd);};
-  const chunks=[];let gotAudio=false,finished=false,played=false;
-  let t=Math.floor(Date.now()/1000)+11644473600;
-  t-=t%300;t*=10000000;
-  const gecStr=t.toString()+"6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-  crypto.subtle.digest("SHA-256",new TextEncoder().encode(gecStr)).then(function(h){
-    const token=Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
-    const url="wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId="+_uuid4()+"&Sec-MS-GEC="+token+"&Sec-MS-GEC-Version=1-143.0.3650.75";
-    let ws;
-    try{ws=new WebSocket(url);}catch(e){fallback();return;}
-    ws.binaryType="arraybuffer";
-    const timer=setTimeout(function(){try{ws.close();}catch(e){}if(!finished)fallback();},15000);
-    ws.onopen=function(){
-      ws.send("X-Timestamp:"+_ts()+"\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"false\"},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}}");
-      ws.send("X-RequestId:"+_uuid4()+"\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:"+_ts()+"\r\nPath:ssml\r\n\r\n"+_ssml(text));
-    };
-    ws.onmessage=function(ev){
-      if(typeof ev.data==="string"){
-        if(ev.data.indexOf("Path:turn.end")>=0){
-          clearTimeout(timer);
-          finished=true;
-          if(!gotAudio)fallback();
-          try{ws.close();}catch(e){}
-        }
-        return;
-      }
-      const buf=new Uint8Array(ev.data);
-      if(buf.length<4)return;
-      const hl=(buf[0]<<8)|buf[1];
-      if(buf.length<2+hl+2)return;
-      const head=new TextDecoder().decode(buf.subarray(2,2+hl));
-      if(head.indexOf("Path:audio")<0)return;
-      const audio=buf.slice(2+hl+2);
-      if(audio.length){gotAudio=true;chunks.push(audio);}
-    };
-    ws.onerror=function(){clearTimeout(timer);fallback();};
-    ws.onclose=function(){
-      if(finished&&gotAudio&&!played&&!S.edgeCancel){
-        played=true;
-        try{
-          const blob=new Blob(chunks,{type:"audio/mpeg"});
-          const a=new Audio(URL.createObjectURL(blob));
-          a.onended=function(){URL.revokeObjectURL(a.src);doneOnce();};
-          a.onerror=function(){URL.revokeObjectURL(a.src);fallback();};
-          S.curAudio=a;
-          const pr=a.play();
-          if(pr&&pr.catch)pr.catch(fallback);
-        }catch(e){fallback();}
-      }
-    };
-  }).catch(fallback);
+  try{
+    const url="https://translate.googleapis.com/translate_tts?ie=UTF-8&q="+encodeURIComponent(text)+"&tl=en&client=tw-ob";
+    const a=new Audio(url);
+    a.referrerPolicy="no-referrer";
+    a.preload="auto";
+    a.playbackRate=S.speed;
+    S.curAudio=a;
+    a.onended=doneOnce;
+    a.onerror=fallback;
+    const pr=a.play();
+    if(pr&&pr.catch)pr.catch(fallback);
+  }catch(e){fallback();}
 }
+
 
 /* ========== 句子切分 ========== */
 const ABBR=/\b(?:Mr|Mrs|Ms|Dr|Prof|St|Mt|Ave|Blvd|Rd|Ltd|Inc|Co|Corp|Jr|Sr|vs|etc|e\.g|i\.e|no|fig|approx|dept|est|min|max|hr|sec|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun|U\.S|U\.K|U\.N|Ph\.D|M\.D)\.\s*$/i;
@@ -708,7 +680,7 @@ function playOne(i,onDone){
   };
   /* 整句一次朗读：连贯自然；桌面 Chrome 可逐词高亮，iOS 整句高亮 */
   if(S.engine==="edge"){
-    playEdge(S.sents[i],done);
+    playBaidu(S.sents[i],done);
   }else{
     speak(S.sents[i],done,ci=>{if(S.playing===i)highlightAt(card,ci);});
   }
